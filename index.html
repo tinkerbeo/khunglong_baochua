@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Floating Chorded Keyboard</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #DDDDDD;
+            overflow: hidden;
+            font-family: sans-serif;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        /* 1️⃣ LOCKED TEXT EDITOR */
+        #editor {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            bottom: 20px;
+            background: white;
+            border-radius: 12px;
+            padding: 120px 20px 20px 120px;
+            font-size: 24px;
+            line-height: 1.4;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            overflow-y: hidden;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        #caret {
+            display: inline-block;
+            width: 2px;
+            height: 26px;
+            background-color: #2196F3;
+            vertical-align: text-bottom;
+            animation: blink 1s step-end infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        #kbCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* Floating Action Buttons */
+        .btn {
+            position: absolute;
+            width: 46px;
+            height: 46px;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            pointer-events: auto;
+            z-index: 20;
+            transition: left 0.08s ease-out, top 0.08s ease-out;
+        }
+
+        /* 🎛️ Testing Controls Panel */
+        .controls-panel {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 270px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.94);
+            padding: 12px 16px;
+            border-radius: 20px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.15);
+            z-index: 30;
+            pointer-events: auto;
+        }
+
+        .slider-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 13px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .slider-label {
+            width: 112px;
+            flex-shrink: 0;
+        }
+
+        .slider {
+            flex: 1;
+            touch-action: pan-x;
+            accent-color: #2196F3;
+        }
+
+        .toggle-row {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 2px;
+        }
+
+        .toggle-btn {
+            padding: 7px 14px;
+            border-radius: 16px;
+            border: none;
+            font-size: 13px;
+            font-weight: bold;
+            color: #333;
+            background: #E0E0E0;
+            pointer-events: auto;
+        }
+
+        .toggle-btn.active {
+            background: #2196F3;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="editor"><span id="textContent"></span><span id="caret"></span></div>
+
+    <canvas id="kbCanvas"></canvas>
+
+    <div class="btn" id="btnSpace">␣</div>
+    <div class="btn" id="btnBackspace">⌫</div>
+
+    <!-- 🎛️ TESTING CONTROLS -->
+    <div class="controls-panel">
+        <div class="slider-row">
+            <span class="slider-label">Circle: <span id="innerVal">45px</span></span>
+            <input type="range" class="slider" id="innerSlider" min="20" max="85" step="1" value="45">
+        </div>
+        <div class="slider-row">
+            <span class="slider-label">Ring Gap: <span id="gapVal">10px</span></span>
+            <input type="range" class="slider" id="gapSlider" min="0" max="45" step="1" value="10">
+        </div>
+        <div class="slider-row">
+            <span class="slider-label">Key Size: <span id="keyVal">22px</span></span>
+            <input type="range" class="slider" id="keySlider" min="14" max="55" step="1" value="22">
+        </div>
+        <div class="toggle-row">
+            <button class="toggle-btn" id="toggleBorders">Borders: OFF</button>
+            <button class="toggle-btn active" id="toggleCursor">Cursor: ON</button>
+        </div>
+    </div>
+
+<script>
+    // 🎛️ INDEPENDENT GEOMETRY VARIABLES
+    let innerRadius = 45; // Blue firing circle
+    let ringGap = 10;     // Buffer gap between inner circle and keys
+    let keySize = 22;     // Radial thickness of keys (+ drives number size)
+
+    let mainRadius, textRadius, outerRadius, labelFontSize;
+
+    const HIGHLIGHT_SCALE = 1.35; // 35% bigger when aimed/fired
+    const numItems = 6;
+    const angleStep = 360 / numItems;
+
+    // 🌟 STATE
+    let textValue = "";
+    let activeTouchId = null;
+    let firstFiredZone = null;
+    let activeCharIndex = null;
+    let fingerPos = null;
+    let ghosts = [];
+    let cursorSparks = [];
+
+    // 🎛️ TOGGLE STATES
+    let showBorders = false;
+    let showCursor = true;
+    
+    let kbdCenter = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+
+    const canvas = document.getElementById('kbCanvas');
+    const ctx = canvas.getContext('2d');
+    const textContent = document.getElementById('textContent');
+    const caret = document.getElementById('caret');
+    const btnSpace = document.getElementById('btnSpace');
+    const btnBackspace = document.getElementById('btnBackspace');
+    const toggleBordersBtn = document.getElementById('toggleBorders');
+    const toggleCursorBtn = document.getElementById('toggleCursor');
+
+    const innerSlider = document.getElementById('innerSlider');
+    const gapSlider = document.getElementById('gapSlider');
+    const keySlider = document.getElementById('keySlider');
+    const innerVal = document.getElementById('innerVal');
+    const gapVal = document.getElementById('gapVal');
+    const keyVal = document.getElementById('keyVal');
+
+    // 📏 RECALCULATE DIMENSIONS FROM ALL 3 SLIDERS
+    function applyDimensions() {
+        mainRadius = innerRadius + ringGap;
+        textRadius = mainRadius + (keySize / 2);
+        outerRadius = mainRadius + keySize;
+        labelFontSize = Math.max(14, Math.round(keySize * 0.95));
+
+        innerVal.textContent = `${innerRadius}px`;
+        gapVal.textContent = `${ringGap}px`;
+        keyVal.textContent = `${keySize}px`;
+
+        updateKeyboardCenter();
+    }
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        updateKeyboardCenter();
+    }
+    window.addEventListener('resize', resize);
+
+    // 📍 CARET TRACKING & FLOATING BUTTON LOGIC
+    function updateKeyboardCenter() {
+        const rect = caret.getBoundingClientRect();
+        kbdCenter = { x: rect.left, y: rect.top + (rect.height / 2) };
+
+        const btnRadius = 23;
+        const offset = (outerRadius + 28) * 0.707;
+
+        btnSpace.style.left = (kbdCenter.x - offset - btnRadius) + 'px';
+        btnSpace.style.top = (kbdCenter.y - offset - btnRadius) + 'px';
+        
+        btnBackspace.style.left = (kbdCenter.x + offset - btnRadius) + 'px';
+        btnBackspace.style.top = (kbdCenter.y - offset - btnRadius) + 'px';
+    }
+
+    applyDimensions();
+    resize();
+
+    // 🎹 COMBO MAP
+    function generateComboMap() {
+        const map = new Map();
+        let charCode = 97; 
+        const extras = [" ", ".", "?", "!"];
+        let extraIdx = 0;
+
+        for (let i = 1; i <= 6; i++) {
+            for (let j = 1; j <= 6; j++) {
+                if (i !== j) {
+                    if (charCode <= 122) { 
+                        map.set(`${i}-${j}`, String.fromCharCode(charCode));
+                        charCode++;
+                    } else if (extraIdx < extras.length) {
+                        map.set(`${i}-${j}`, extras[extraIdx]);
+                        extraIdx++;
+                    }
+                }
+            }
+        }
+        return map;
+    }
+    const comboMap = generateComboMap();
+
+    // 🔄 ROTATED ZONE MAPPING (1 starts at 8 o'clock, clockwise)
+    function getZoneForIndex(index) { 
+        return ((index + 2) % 6) + 1; 
+    }
+    
+    function commitText(char) {
+        textValue += char;
+        textContent.textContent = textValue;
+        updateKeyboardCenter();
+    }
+
+    function deleteChar() {
+        if (textValue.length > 0) {
+            textValue = textValue.slice(0, -1);
+            textContent.textContent = textValue;
+            updateKeyboardCenter();
+        }
+    }
+
+    // 🔍 FULL 360° HITBOX CHECK
+    function getHitZoneIndex(x, y) {
+        const dx = x - kbdCenter.x;
+        const dy = y - kbdCenter.y;
+        const distToCenter = Math.sqrt(dx * dx + dy * dy);
+
+        if (distToCenter < mainRadius || distToCenter > outerRadius) return null;
+
+        let angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+        if (angleDeg < 0) angleDeg += 360;
+
+        let shiftedAngle = (angleDeg + 90) % 360;
+        return Math.round(shiftedAngle / angleStep) % numItems;
+    }
+
+    // 👆 MULTI-TOUCH & PALM-REJECTION HANDLER
+    function handleTouch(e) {
+        let activeTouch = null;
+
+        if (activeTouchId !== null) {
+            for (let i = 0; i < e.touches.length; i++) {
+                if (e.touches[i].identifier === activeTouchId) {
+                    activeTouch = e.touches[i];
+                    break;
+                }
+            }
+            if (!activeTouch) {
+                activeTouchId = null;
+                activeCharIndex = null;
+                fingerPos = null;
+            }
+        }
+
+        if (activeTouchId === null) {
+            for (let i = 0; i < e.touches.length; i++) {
+                const t = e.touches[i];
+                const hitZone = getHitZoneIndex(t.clientX, t.clientY);
+                if (hitZone !== null) {
+                    activeTouchId = t.identifier;
+                    activeTouch = t;
+                    break;
+                }
+            }
+        }
+
+        if (!activeTouch) return;
+
+        fingerPos = { x: activeTouch.clientX, y: activeTouch.clientY };
+
+        const dx = fingerPos.x - kbdCenter.x;
+        const dy = fingerPos.y - kbdCenter.y;
+        const distToCenter = Math.sqrt(dx * dx + dy * dy);
+
+        // --- 1️⃣ UPPER BOUND CANCEL ---
+        if (distToCenter > outerRadius) {
+            activeCharIndex = null;
+        }
+        // --- 2️⃣ AIMING BAND ---
+        else if (distToCenter > innerRadius) {
+            if (distToCenter >= mainRadius) {
+                activeCharIndex = getHitZoneIndex(fingerPos.x, fingerPos.y);
+            }
+        }
+        // --- 3️⃣ FIRING LOGIC ---
+        else {
+            if (activeCharIndex !== null) {
+                const firedZone = getZoneForIndex(activeCharIndex);
+                const isCancelBtn = (firstFiredZone !== null && firedZone === firstFiredZone);
+                
+                const mappedChar = (firstFiredZone !== null && !isCancelBtn) 
+                    ? comboMap.get(`${firstFiredZone}-${firedZone}`) 
+                    : null;
+
+                const isValidAction = isCancelBtn || firstFiredZone === null || mappedChar;
+
+                if (isValidAction) {
+                    const ghostText = isCancelBtn ? "🔙" : firedZone.toString();
+                    const angleRad = ((activeCharIndex * angleStep) - 90) * Math.PI / 180;
+                    
+                    const now = Date.now();
+                    ghosts.push({
+                        text: ghostText,
+                        x: kbdCenter.x + Math.cos(angleRad) * textRadius,
+                        y: kbdCenter.y + Math.sin(angleRad) * textRadius,
+                        isCancelBtn: isCancelBtn,
+                        startTime: now
+                    });
+
+                    if (showCursor) {
+                        cursorSparks.push({
+                            x: fingerPos.x,
+                            y: fingerPos.y,
+                            isCancelBtn: isCancelBtn,
+                            startTime: now
+                        });
+                    }
+
+                    if (firstFiredZone === null) {
+                        firstFiredZone = firedZone;
+                    } else {
+                        if (isCancelBtn) {
+                            firstFiredZone = null;
+                        } else {
+                            commitText(mappedChar);
+                            firstFiredZone = null;
+                        }
+                    }
+                }
+                activeCharIndex = null;
+            }
+        }
+    }
+
+    function isUiControl(target) {
+        return Boolean(target.closest('.btn, .controls-panel'));
+    }
+
+    document.addEventListener('touchstart', (e) => {
+        if (isUiControl(e.target)) return;
+        e.preventDefault();
+        handleTouch(e);
+    }, {passive: false});
+
+    document.addEventListener('touchmove', (e) => {
+        if (isUiControl(e.target)) return;
+        e.preventDefault(); 
+        handleTouch(e);
+    }, {passive: false});
+
+    document.addEventListener('touchend', (e) => {
+        if (isUiControl(e.target)) return;
+        e.preventDefault();
+        handleTouch(e);
+    }, {passive: false});
+
+    document.addEventListener('touchcancel', (e) => {
+        handleTouch(e);
+    }, {passive: false});
+
+    // Floating Action Buttons
+    btnSpace.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        commitText(" ");
+    }, {passive: false});
+    
+    btnBackspace.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        deleteChar();
+    }, {passive: false});
+
+    // 🎛️ Slider Listeners
+    innerSlider.addEventListener('input', (e) => {
+        innerRadius = parseInt(e.target.value, 10);
+        applyDimensions();
+    });
+
+    gapSlider.addEventListener('input', (e) => {
+        ringGap = parseInt(e.target.value, 10);
+        applyDimensions();
+    });
+
+    keySlider.addEventListener('input', (e) => {
+        keySize = parseInt(e.target.value, 10);
+        applyDimensions();
+    });
+
+    // 🎛️ Toggle Listeners
+    toggleBordersBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showBorders = !showBorders;
+        toggleBordersBtn.textContent = `Borders: ${showBorders ? 'ON' : 'OFF'}`;
+        toggleBordersBtn.classList.toggle('active', showBorders);
+    }, {passive: false});
+
+    toggleCursorBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showCursor = !showCursor;
+        toggleCursorBtn.textContent = `Cursor: ${showCursor ? 'ON' : 'OFF'}`;
+        toggleCursorBtn.classList.toggle('active', showCursor);
+    }, {passive: false});
+
+    // 🎨 RENDER LOOP
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const cx = kbdCenter.x;
+        const cy = kbdCenter.y;
+        const now = Date.now();
+
+        // 1️⃣ COMPLETE INNER CIRCLE
+        ctx.beginPath();
+        ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = '#2196F3';
+        ctx.lineWidth = Math.max(3, Math.min(6, innerRadius * 0.1));
+        ctx.stroke();
+
+        // 2️⃣ OPTIONAL KEY BORDERS
+        if (showBorders) {
+            ctx.strokeStyle = 'rgba(128, 128, 128, 0.6)';
+            ctx.lineWidth = 2;
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, mainRadius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, outerRadius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            for (let i = 0; i < numItems; i++) {
+                const dividerRad = ((i * angleStep) - 90 - (angleStep / 2)) * Math.PI / 180;
+                ctx.beginPath();
+                ctx.moveTo(cx + Math.cos(dividerRad) * mainRadius, cy + Math.sin(dividerRad) * mainRadius);
+                ctx.lineTo(cx + Math.cos(dividerRad) * outerRadius, cy + Math.sin(dividerRad) * outerRadius);
+                ctx.stroke();
+            }
+        }
+
+        // 3️⃣ DRAW NUMBERS (Inflated & highlighted when aimed or anchored)
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        for (let i = 0; i < numItems; i++) {
+            const zone = getZoneForIndex(i);
+            const isAnchor = (zone === firstFiredZone);
+            const isActive = (i === activeCharIndex);
+            const isHighlighted = isAnchor || isActive;
+
+            const angleRad = ((i * angleStep) - 90) * Math.PI / 180;
+            const textX = cx + Math.cos(angleRad) * textRadius;
+            const textY = cy + Math.sin(angleRad) * textRadius;
+
+            const fontSize = isHighlighted ? Math.round(labelFontSize * HIGHLIGHT_SCALE) : labelFontSize;
+            ctx.font = `bold ${fontSize}px sans-serif`;
+
+            if (isAnchor && isActive) {
+                ctx.fillStyle = '#FF9800'; // Orange: Aiming to cancel
+            } else if (isAnchor) {
+                ctx.fillStyle = '#4CAF50'; // Green: Anchored
+            } else if (isActive) {
+                ctx.fillStyle = '#2196F3'; // Blue: Aimed
+            } else {
+                ctx.fillStyle = '#000000'; // Default
+            }
+
+            ctx.fillText(zone.toString(), textX, textY);
+        }
+
+        // 4️⃣ FIRED STATE TEXT SPARKS (Inflated)
+        const sparkFontSize = Math.round(labelFontSize * HIGHLIGHT_SCALE);
+        ctx.font = `bold ${sparkFontSize}px sans-serif`;
+
+        ghosts = ghosts.filter(ghost => {
+            const age = now - ghost.startTime;
+            if (age > 300) return false; 
+            
+            const alpha = 1 - (age / 300);
+            ctx.fillStyle = ghost.isCancelBtn ? `rgba(255, 152, 0, ${alpha})` : `rgba(76, 175, 80, ${alpha})`;
+            ctx.fillText(ghost.text, ghost.x, ghost.y);
+            return true;
+        });
+
+        // 5️⃣ OPTIONAL FINGER CURSOR & SPARKS
+        if (showCursor) {
+            cursorSparks = cursorSparks.filter(spark => {
+                const age = now - spark.startTime;
+                if (age > 300) return false;
+
+                const p = age / 300;
+                const currentRadius = 24 + (60 - 24) * p;
+                const alpha = 1 - p;
+                
+                const r = spark.isCancelBtn ? 255 : 76;
+                const g = spark.isCancelBtn ? 152 : 175;
+                const b = spark.isCancelBtn ? 0 : 80;
+
+                ctx.beginPath();
+                ctx.arc(spark.x, spark.y, currentRadius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.4})`;
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(spark.x, spark.y, currentRadius, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                ctx.lineWidth = 6;
+                ctx.stroke();
+
+                return true;
+            });
+
+            if (fingerPos) {
+                ctx.beginPath();
+                ctx.arc(fingerPos.x, fingerPos.y, 24, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(33, 150, 243, 0.3)';
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.arc(fingerPos.x, fingerPos.y, 6, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(fingerPos.x, fingerPos.y, 24, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(33, 150, 243, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        } else {
+            cursorSparks = [];
+        }
+
+        requestAnimationFrame(draw);
+    }
+
+    requestAnimationFrame(draw);
+</script>
+</body>
+</html>
