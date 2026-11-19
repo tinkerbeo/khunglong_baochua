@@ -84,19 +84,21 @@
         /* 🎛️ Testing Controls Panel */
         .controls-panel {
             position: absolute;
-            bottom: 24px;
+            bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            width: 270px;
+            width: 300px;
+            max-width: 92vw;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
             background: rgba(255, 255, 255, 0.94);
-            padding: 12px 16px;
+            padding: 10px 14px;
             border-radius: 20px;
             box-shadow: 0 3px 10px rgba(0,0,0,0.15);
             z-index: 30;
             pointer-events: auto;
+            box-sizing: border-box;
         }
 
         .slider-row {
@@ -110,7 +112,7 @@
         }
 
         .slider-label {
-            width: 112px;
+            width: 118px;
             flex-shrink: 0;
         }
 
@@ -123,19 +125,20 @@
         .toggle-row {
             display: flex;
             justify-content: center;
-            gap: 10px;
-            margin-top: 2px;
+            gap: 8px;
+            margin-top: 4px;
         }
 
         .toggle-btn {
-            padding: 7px 14px;
+            padding: 7px 10px;
             border-radius: 16px;
             border: none;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: bold;
             color: #333;
             background: #E0E0E0;
             pointer-events: auto;
+            white-space: nowrap;
         }
 
         .toggle-btn.active {
@@ -167,21 +170,26 @@
             <span class="slider-label">Key Size: <span id="keyVal">22px</span></span>
             <input type="range" class="slider" id="keySlider" min="14" max="55" step="1" value="22">
         </div>
+        <div class="slider-row">
+            <span class="slider-label">Char Size: <span id="charVal">21px</span></span>
+            <input type="range" class="slider" id="charSlider" min="12" max="48" step="1" value="21">
+        </div>
         <div class="toggle-row">
             <button class="toggle-btn" id="toggleBorders">Borders: OFF</button>
             <button class="toggle-btn active" id="toggleCursor">Cursor: ON</button>
+            <button class="toggle-btn active" id="toggleRipple">Ripple: ON</button>
         </div>
     </div>
 
 <script>
-    // 🎛️ INDEPENDENT GEOMETRY VARIABLES
-    let innerRadius = 45; // Blue firing circle
-    let ringGap = 10;     // Buffer gap between inner circle and keys
-    let keySize = 22;     // Radial thickness of keys (+ drives number size)
+    // 🎛️ INDEPENDENT GEOMETRY & TYPOGRAPHY VARIABLES
+    let innerRadius = 45;
+    let ringGap = 10;
+    let keySize = 22;
+    let labelFontSize = 21;
 
-    let mainRadius, textRadius, outerRadius, labelFontSize;
+    let mainRadius, textRadius, outerRadius;
 
-    const HIGHLIGHT_SCALE = 1.35; // 35% bigger when aimed/fired
     const numItems = 6;
     const angleStep = 360 / numItems;
 
@@ -191,12 +199,13 @@
     let firstFiredZone = null;
     let activeCharIndex = null;
     let fingerPos = null;
-    let ghosts = [];
+    let zoneFlashes = [];
     let cursorSparks = [];
 
     // 🎛️ TOGGLE STATES
     let showBorders = false;
     let showCursor = true;
+    let showRipple = true;
     
     let kbdCenter = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 
@@ -208,24 +217,28 @@
     const btnBackspace = document.getElementById('btnBackspace');
     const toggleBordersBtn = document.getElementById('toggleBorders');
     const toggleCursorBtn = document.getElementById('toggleCursor');
+    const toggleRippleBtn = document.getElementById('toggleRipple');
 
     const innerSlider = document.getElementById('innerSlider');
     const gapSlider = document.getElementById('gapSlider');
     const keySlider = document.getElementById('keySlider');
+    const charSlider = document.getElementById('charSlider');
+
     const innerVal = document.getElementById('innerVal');
     const gapVal = document.getElementById('gapVal');
     const keyVal = document.getElementById('keyVal');
+    const charVal = document.getElementById('charVal');
 
-    // 📏 RECALCULATE DIMENSIONS FROM ALL 3 SLIDERS
+    // 📏 RECALCULATE DIMENSIONS
     function applyDimensions() {
         mainRadius = innerRadius + ringGap;
         textRadius = mainRadius + (keySize / 2);
         outerRadius = mainRadius + keySize;
-        labelFontSize = Math.max(14, Math.round(keySize * 0.95));
 
         innerVal.textContent = `${innerRadius}px`;
         gapVal.textContent = `${ringGap}px`;
         keyVal.textContent = `${keySize}px`;
+        charVal.textContent = `${labelFontSize}px`;
 
         updateKeyboardCenter();
     }
@@ -374,19 +387,16 @@
                 const isValidAction = isCancelBtn || firstFiredZone === null || mappedChar;
 
                 if (isValidAction) {
-                    const ghostText = isCancelBtn ? "🔙" : firedZone.toString();
-                    const angleRad = ((activeCharIndex * angleStep) - 90) * Math.PI / 180;
-                    
                     const now = Date.now();
-                    ghosts.push({
-                        text: ghostText,
-                        x: kbdCenter.x + Math.cos(angleRad) * textRadius,
-                        y: kbdCenter.y + Math.sin(angleRad) * textRadius,
+
+                    // ⚡ Brief color flash on the fired key
+                    zoneFlashes.push({
+                        index: activeCharIndex,
                         isCancelBtn: isCancelBtn,
                         startTime: now
                     });
 
-                    if (showCursor) {
+                    if (showRipple) {
                         cursorSparks.push({
                             x: fingerPos.x,
                             y: fingerPos.y,
@@ -466,6 +476,11 @@
         applyDimensions();
     });
 
+    charSlider.addEventListener('input', (e) => {
+        labelFontSize = parseInt(e.target.value, 10);
+        applyDimensions();
+    });
+
     // 🎛️ Toggle Listeners
     toggleBordersBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
@@ -483,6 +498,27 @@
         toggleCursorBtn.classList.toggle('active', showCursor);
     }, {passive: false});
 
+    toggleRippleBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showRipple = !showRipple;
+        toggleRippleBtn.textContent = `Ripple: ${showRipple ? 'ON' : 'OFF'}`;
+        toggleRippleBtn.classList.toggle('active', showRipple);
+    }, {passive: false});
+
+    // 🎨 HELPER TO FILL A 60° KEY WEDGE
+    function fillKeyWedge(cx, cy, index, fillStyle) {
+        const startRad = ((index * angleStep) - 90 - (angleStep / 2)) * Math.PI / 180;
+        const endRad = ((index * angleStep) - 90 + (angleStep / 2)) * Math.PI / 180;
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, outerRadius, startRad, endRad, false);
+        ctx.arc(cx, cy, mainRadius, endRad, startRad, true);
+        ctx.closePath();
+        ctx.fillStyle = fillStyle;
+        ctx.fill();
+    }
+
     // 🎨 RENDER LOOP
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -490,14 +526,41 @@
         const cy = kbdCenter.y;
         const now = Date.now();
 
-        // 1️⃣ COMPLETE INNER CIRCLE
+        // 1️⃣ COLOR-FILLED KEY HIGHLIGHTS
+        for (let i = 0; i < numItems; i++) {
+            const zone = getZoneForIndex(i);
+            const isAnchor = (zone === firstFiredZone);
+            const isActive = (i === activeCharIndex);
+
+            if (isAnchor && isActive) {
+                fillKeyWedge(cx, cy, i, 'rgba(255, 152, 0, 0.85)'); // Orange: Cancel hover
+            } else if (isAnchor) {
+                fillKeyWedge(cx, cy, i, 'rgba(76, 175, 80, 0.85)'); // Green: Anchored
+            } else if (isActive) {
+                fillKeyWedge(cx, cy, i, 'rgba(33, 150, 243, 0.75)'); // Blue: Aimed
+            }
+        }
+
+        // 2️⃣ FIRED KEY FLASHES
+        zoneFlashes = zoneFlashes.filter(flash => {
+            const age = now - flash.startTime;
+            if (age > 250) return false;
+            const alpha = (1 - age / 250) * 0.7;
+            const color = flash.isCancelBtn
+                ? `rgba(255, 152, 0, ${alpha})`
+                : `rgba(76, 175, 80, ${alpha})`;
+            fillKeyWedge(cx, cy, flash.index, color);
+            return true;
+        });
+
+        // 3️⃣ COMPLETE INNER CIRCLE
         ctx.beginPath();
         ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
         ctx.strokeStyle = '#2196F3';
         ctx.lineWidth = Math.max(3, Math.min(6, innerRadius * 0.1));
         ctx.stroke();
 
-        // 2️⃣ OPTIONAL KEY BORDERS
+        // 4️⃣ OPTIONAL KEY BORDERS
         if (showBorders) {
             ctx.strokeStyle = 'rgba(128, 128, 128, 0.6)';
             ctx.lineWidth = 2;
@@ -519,52 +582,40 @@
             }
         }
 
-        // 3️⃣ DRAW NUMBERS (Inflated & highlighted when aimed or anchored)
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        // 5️⃣ DRAW CHARACTERS ONLY AFTER FIRST STROKE
+        if (firstFiredZone !== null) {
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = `bold ${labelFontSize}px sans-serif`;
 
-        for (let i = 0; i < numItems; i++) {
-            const zone = getZoneForIndex(i);
-            const isAnchor = (zone === firstFiredZone);
-            const isActive = (i === activeCharIndex);
-            const isHighlighted = isAnchor || isActive;
+            for (let i = 0; i < numItems; i++) {
+                const zone = getZoneForIndex(i);
+                const isAnchor = (zone === firstFiredZone);
+                const isActive = (i === activeCharIndex);
 
-            const angleRad = ((i * angleStep) - 90) * Math.PI / 180;
-            const textX = cx + Math.cos(angleRad) * textRadius;
-            const textY = cy + Math.sin(angleRad) * textRadius;
+                const angleRad = ((i * angleStep) - 90) * Math.PI / 180;
+                const textX = cx + Math.cos(angleRad) * textRadius;
+                const textY = cy + Math.sin(angleRad) * textRadius;
 
-            const fontSize = isHighlighted ? Math.round(labelFontSize * HIGHLIGHT_SCALE) : labelFontSize;
-            ctx.font = `bold ${fontSize}px sans-serif`;
+                if (isAnchor) {
+                    if (isActive) {
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillText('✕', textX, textY);
+                    }
+                    continue;
+                }
 
-            if (isAnchor && isActive) {
-                ctx.fillStyle = '#FF9800'; // Orange: Aiming to cancel
-            } else if (isAnchor) {
-                ctx.fillStyle = '#4CAF50'; // Green: Anchored
-            } else if (isActive) {
-                ctx.fillStyle = '#2196F3'; // Blue: Aimed
-            } else {
-                ctx.fillStyle = '#000000'; // Default
+                const mappedChar = comboMap.get(`${firstFiredZone}-${zone}`);
+                if (!mappedChar) continue;
+
+                const displayChar = mappedChar === ' ' ? '␣' : mappedChar;
+                ctx.fillStyle = isActive ? '#FFFFFF' : '#000000';
+                ctx.fillText(displayChar, textX, textY);
             }
-
-            ctx.fillText(zone.toString(), textX, textY);
         }
 
-        // 4️⃣ FIRED STATE TEXT SPARKS (Inflated)
-        const sparkFontSize = Math.round(labelFontSize * HIGHLIGHT_SCALE);
-        ctx.font = `bold ${sparkFontSize}px sans-serif`;
-
-        ghosts = ghosts.filter(ghost => {
-            const age = now - ghost.startTime;
-            if (age > 300) return false; 
-            
-            const alpha = 1 - (age / 300);
-            ctx.fillStyle = ghost.isCancelBtn ? `rgba(255, 152, 0, ${alpha})` : `rgba(76, 175, 80, ${alpha})`;
-            ctx.fillText(ghost.text, ghost.x, ghost.y);
-            return true;
-        });
-
-        // 5️⃣ OPTIONAL FINGER CURSOR & SPARKS
-        if (showCursor) {
+        // 6️⃣ OPTIONAL RIPPLE EFFECT
+        if (showRipple) {
             cursorSparks = cursorSparks.filter(spark => {
                 const age = now - spark.startTime;
                 if (age > 300) return false;
@@ -590,26 +641,27 @@
 
                 return true;
             });
-
-            if (fingerPos) {
-                ctx.beginPath();
-                ctx.arc(fingerPos.x, fingerPos.y, 24, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(33, 150, 243, 0.3)';
-                ctx.fill();
-                
-                ctx.beginPath();
-                ctx.arc(fingerPos.x, fingerPos.y, 6, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-                ctx.fill();
-
-                ctx.beginPath();
-                ctx.arc(fingerPos.x, fingerPos.y, 24, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(33, 150, 243, 0.8)';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            }
         } else {
             cursorSparks = [];
+        }
+
+        // 7️⃣ OPTIONAL FINGER TRACKING CURSOR
+        if (showCursor && fingerPos) {
+            ctx.beginPath();
+            ctx.arc(fingerPos.x, fingerPos.y, 24, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(33, 150, 243, 0.3)';
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(fingerPos.x, fingerPos.y, 6, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(fingerPos.x, fingerPos.y, 24, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(33, 150, 243, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
         }
 
         requestAnimationFrame(draw);
