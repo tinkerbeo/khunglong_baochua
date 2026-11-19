@@ -87,7 +87,7 @@
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            width: 300px;
+            width: 310px;
             max-width: 92vw;
             display: flex;
             flex-direction: column;
@@ -124,13 +124,14 @@
 
         .toggle-row {
             display: flex;
+            flex-wrap: wrap;
             justify-content: center;
-            gap: 8px;
+            gap: 6px;
             margin-top: 4px;
         }
 
         .toggle-btn {
-            padding: 7px 10px;
+            padding: 6px 10px;
             border-radius: 16px;
             border: none;
             font-size: 12px;
@@ -175,6 +176,8 @@
             <input type="range" class="slider" id="charSlider" min="12" max="48" step="1" value="21">
         </div>
         <div class="toggle-row">
+            <button class="toggle-btn active" id="toggleInner">Inner: ON</button>
+            <button class="toggle-btn active" id="toggleOuter">Outer: ON</button>
             <button class="toggle-btn" id="toggleBorders">Borders: OFF</button>
             <button class="toggle-btn active" id="toggleCursor">Cursor: ON</button>
             <button class="toggle-btn active" id="toggleRipple">Ripple: ON</button>
@@ -203,6 +206,8 @@
     let cursorSparks = [];
 
     // 🎛️ TOGGLE STATES
+    let showInnerCircle = true;
+    let showOuterCircle = true;
     let showBorders = false;
     let showCursor = true;
     let showRipple = true;
@@ -215,6 +220,9 @@
     const caret = document.getElementById('caret');
     const btnSpace = document.getElementById('btnSpace');
     const btnBackspace = document.getElementById('btnBackspace');
+
+    const toggleInnerBtn = document.getElementById('toggleInner');
+    const toggleOuterBtn = document.getElementById('toggleOuter');
     const toggleBordersBtn = document.getElementById('toggleBorders');
     const toggleCursorBtn = document.getElementById('toggleCursor');
     const toggleRippleBtn = document.getElementById('toggleRipple');
@@ -389,7 +397,6 @@
                 if (isValidAction) {
                     const now = Date.now();
 
-                    // ⚡ Brief color flash on the fired key
                     zoneFlashes.push({
                         index: activeCharIndex,
                         isCancelBtn: isCancelBtn,
@@ -482,6 +489,22 @@
     });
 
     // 🎛️ Toggle Listeners
+    toggleInnerBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showInnerCircle = !showInnerCircle;
+        toggleInnerBtn.textContent = `Inner: ${showInnerCircle ? 'ON' : 'OFF'}`;
+        toggleInnerBtn.classList.toggle('active', showInnerCircle);
+    }, {passive: false});
+
+    toggleOuterBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showOuterCircle = !showOuterCircle;
+        toggleOuterBtn.textContent = `Outer: ${showOuterCircle ? 'ON' : 'OFF'}`;
+        toggleOuterBtn.classList.toggle('active', showOuterCircle);
+    }, {passive: false});
+
     toggleBordersBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -533,11 +556,11 @@
             const isActive = (i === activeCharIndex);
 
             if (isAnchor && isActive) {
-                fillKeyWedge(cx, cy, i, 'rgba(255, 152, 0, 0.85)'); // Orange: Cancel hover
+                fillKeyWedge(cx, cy, i, 'rgba(255, 152, 0, 0.85)');
             } else if (isAnchor) {
-                fillKeyWedge(cx, cy, i, 'rgba(76, 175, 80, 0.85)'); // Green: Anchored
+                fillKeyWedge(cx, cy, i, 'rgba(76, 175, 80, 0.85)');
             } else if (isActive) {
-                fillKeyWedge(cx, cy, i, 'rgba(33, 150, 243, 0.75)'); // Blue: Aimed
+                fillKeyWedge(cx, cy, i, 'rgba(33, 150, 243, 0.75)');
             }
         }
 
@@ -553,12 +576,14 @@
             return true;
         });
 
-        // 3️⃣ COMPLETE INNER CIRCLE
-        ctx.beginPath();
-        ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = '#2196F3';
-        ctx.lineWidth = Math.max(3, Math.min(6, innerRadius * 0.1));
-        ctx.stroke();
+        // 3️⃣ OPTIONAL INNER BLUE CIRCLE
+        if (showInnerCircle) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = '#2196F3';
+            ctx.lineWidth = Math.max(3, Math.min(6, innerRadius * 0.1));
+            ctx.stroke();
+        }
 
         // 4️⃣ OPTIONAL KEY BORDERS
         if (showBorders) {
@@ -582,7 +607,16 @@
             }
         }
 
-        // 5️⃣ DRAW CHARACTERS ONLY AFTER FIRST STROKE
+        // 5️⃣ OPTIONAL OUTER BOUNDING CIRCLE
+        if (showOuterCircle) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, outerRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = '#2196F3';
+            ctx.lineWidth = Math.max(2, Math.min(4, innerRadius * 0.08));
+            ctx.stroke();
+        }
+
+        // 6️⃣ DRAW CHARACTERS ONLY AFTER FIRST STROKE
         if (firstFiredZone !== null) {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -614,7 +648,7 @@
             }
         }
 
-        // 6️⃣ OPTIONAL RIPPLE EFFECT
+        // 7️⃣ OPTIONAL RIPPLE EFFECT
         if (showRipple) {
             cursorSparks = cursorSparks.filter(spark => {
                 const age = now - spark.startTime;
@@ -645,7 +679,7 @@
             cursorSparks = [];
         }
 
-        // 7️⃣ OPTIONAL FINGER TRACKING CURSOR
+        // 8️⃣ OPTIONAL FINGER TRACKING CURSOR
         if (showCursor && fingerPos) {
             ctx.beginPath();
             ctx.arc(fingerPos.x, fingerPos.y, 24, 0, Math.PI * 2);
