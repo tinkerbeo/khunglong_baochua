@@ -81,17 +81,21 @@
             transition: left 0.08s ease-out, top 0.08s ease-out;
         }
 
+        .btn.dragging {
+            transition: none;
+        }
+
         /* 🎛️ Testing Controls Panel */
         .controls-panel {
             position: absolute;
-            bottom: 20px;
+            bottom: 16px;
             left: 50%;
             transform: translateX(-50%);
-            width: 310px;
-            max-width: 92vw;
+            width: 320px;
+            max-width: 94vw;
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 5px;
             background: rgba(255, 255, 255, 0.94);
             padding: 10px 14px;
             border-radius: 20px;
@@ -105,14 +109,14 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 10px;
-            font-size: 13px;
+            gap: 8px;
+            font-size: 12px;
             font-weight: bold;
             color: #333;
         }
 
         .slider-label {
-            width: 118px;
+            width: 112px;
             flex-shrink: 0;
         }
 
@@ -120,6 +124,34 @@
             flex: 1;
             touch-action: pan-x;
             accent-color: #2196F3;
+        }
+
+        .offset-grid {
+            display: flex;
+            gap: 10px;
+            margin-top: 2px;
+            padding-top: 5px;
+            border-top: 1px solid #E8E8E8;
+            transition: opacity 0.15s;
+        }
+
+        .offset-grid.disabled {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .offset-col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .offset-col .slider {
+            width: 100%;
         }
 
         .toggle-row {
@@ -144,6 +176,11 @@
 
         .toggle-btn.active {
             background: #2196F3;
+            color: white;
+        }
+
+        .toggle-btn.move-active {
+            background: #FF9800;
             color: white;
         }
     </style>
@@ -175,7 +212,23 @@
             <span class="slider-label">Char Size: <span id="charVal">21px</span></span>
             <input type="range" class="slider" id="charSlider" min="12" max="48" step="1" value="21">
         </div>
+
+        <!-- 📍 CARET OFFSET SLIDERS -->
+        <div class="offset-grid" id="offsetGrid">
+            <div class="offset-col">
+                <span>Offset X: <span id="offsetXVal">0px</span></span>
+                <input type="range" class="slider" id="offsetXSlider" min="-200" max="200" step="1" value="0">
+            </div>
+            <div class="offset-col">
+                <span>Offset Y: <span id="offsetYVal">0px</span></span>
+                <input type="range" class="slider" id="offsetYSlider" min="-200" max="250" step="1" value="0">
+            </div>
+        </div>
+
         <div class="toggle-row">
+            <button class="toggle-btn active" id="toggleFollow">Follow: ON</button>
+            <button class="toggle-btn" id="toggleMove">Move: OFF</button>
+            <button class="toggle-btn" id="btnResetPos">Reset Pos</button>
             <button class="toggle-btn active" id="toggleInner">Inner: ON</button>
             <button class="toggle-btn active" id="toggleOuter">Outer: ON</button>
             <button class="toggle-btn" id="toggleBorders">Borders: OFF</button>
@@ -191,6 +244,12 @@
     let keySize = 22;
     let labelFontSize = 21;
 
+    // 📍 POSITIONING VARIABLES
+    let followCaret = true;
+    let offsetX = 0;
+    let offsetY = 0;
+    let fixedPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+
     let mainRadius, textRadius, outerRadius;
 
     const numItems = 6;
@@ -205,6 +264,12 @@
     let zoneFlashes = [];
     let cursorSparks = [];
 
+    // 🖐️ MOVE MODE DRAG STATE
+    let moveMode = false;
+    let dragTouchId = null;
+    let dragStartTouch = null;
+    let dragStartOrigin = null;
+
     // 🎛️ TOGGLE STATES
     let showInnerCircle = true;
     let showOuterCircle = true;
@@ -212,6 +277,7 @@
     let showCursor = true;
     let showRipple = true;
     
+    let caretPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     let kbdCenter = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 
     const canvas = document.getElementById('kbCanvas');
@@ -220,7 +286,11 @@
     const caret = document.getElementById('caret');
     const btnSpace = document.getElementById('btnSpace');
     const btnBackspace = document.getElementById('btnBackspace');
+    const offsetGrid = document.getElementById('offsetGrid');
 
+    const toggleFollowBtn = document.getElementById('toggleFollow');
+    const toggleMoveBtn = document.getElementById('toggleMove');
+    const btnResetPos = document.getElementById('btnResetPos');
     const toggleInnerBtn = document.getElementById('toggleInner');
     const toggleOuterBtn = document.getElementById('toggleOuter');
     const toggleBordersBtn = document.getElementById('toggleBorders');
@@ -231,11 +301,15 @@
     const gapSlider = document.getElementById('gapSlider');
     const keySlider = document.getElementById('keySlider');
     const charSlider = document.getElementById('charSlider');
+    const offsetXSlider = document.getElementById('offsetXSlider');
+    const offsetYSlider = document.getElementById('offsetYSlider');
 
     const innerVal = document.getElementById('innerVal');
     const gapVal = document.getElementById('gapVal');
     const keyVal = document.getElementById('keyVal');
     const charVal = document.getElementById('charVal');
+    const offsetXVal = document.getElementById('offsetXVal');
+    const offsetYVal = document.getElementById('offsetYVal');
 
     // 📏 RECALCULATE DIMENSIONS
     function applyDimensions() {
@@ -248,7 +322,15 @@
         keyVal.textContent = `${keySize}px`;
         charVal.textContent = `${labelFontSize}px`;
 
+        updateOffsetUI();
         updateKeyboardCenter();
+    }
+
+    function updateOffsetUI() {
+        offsetXVal.textContent = `${offsetX}px`;
+        offsetYVal.textContent = `${offsetY}px`;
+        offsetXSlider.value = Math.max(-200, Math.min(200, offsetX));
+        offsetYSlider.value = Math.max(-200, Math.min(250, offsetY));
     }
 
     function resize() {
@@ -258,10 +340,16 @@
     }
     window.addEventListener('resize', resize);
 
-    // 📍 CARET TRACKING & FLOATING BUTTON LOGIC
+    // 📍 CARET TRACKING OR PINNED POSITION
     function updateKeyboardCenter() {
         const rect = caret.getBoundingClientRect();
-        kbdCenter = { x: rect.left, y: rect.top + (rect.height / 2) };
+        caretPos = { x: rect.left, y: rect.top + (rect.height / 2) };
+
+        if (followCaret) {
+            kbdCenter = { x: caretPos.x + offsetX, y: caretPos.y + offsetY };
+        } else {
+            kbdCenter = { x: fixedPos.x, y: fixedPos.y };
+        }
 
         const btnRadius = 23;
         const offset = (outerRadius + 28) * 0.707;
@@ -334,8 +422,69 @@
         return Math.round(shiftedAngle / angleStep) % numItems;
     }
 
+    // 🖐️ MOVE MODE DRAG HANDLER (Works in both Follow & Pinned modes)
+    function handleMoveDrag(e) {
+        if (e.type === 'touchstart' && dragTouchId === null && e.changedTouches.length > 0) {
+            const t = e.changedTouches[0];
+            dragTouchId = t.identifier;
+            dragStartTouch = { x: t.clientX, y: t.clientY };
+            dragStartOrigin = followCaret
+                ? { x: offsetX, y: offsetY }
+                : { x: fixedPos.x, y: fixedPos.y };
+            btnSpace.classList.add('dragging');
+            btnBackspace.classList.add('dragging');
+            return;
+        }
+
+        if (dragTouchId === null) return;
+
+        let dragTouch = null;
+        for (let i = 0; i < e.touches.length; i++) {
+            if (e.touches[i].identifier === dragTouchId) {
+                dragTouch = e.touches[i];
+                break;
+            }
+        }
+
+        if (!dragTouch) {
+            dragTouchId = null;
+            dragStartTouch = null;
+            dragStartOrigin = null;
+            btnSpace.classList.remove('dragging');
+            btnBackspace.classList.remove('dragging');
+            return;
+        }
+
+        const dx = dragTouch.clientX - dragStartTouch.x;
+        const dy = dragTouch.clientY - dragStartTouch.y;
+
+        if (followCaret) {
+            let newX = Math.round(dragStartOrigin.x + dx);
+            let newY = Math.round(dragStartOrigin.y + dy);
+
+            if (Math.abs(newX) <= 6) newX = 0;
+            if (Math.abs(newY) <= 6) newY = 0;
+
+            offsetX = newX;
+            offsetY = newY;
+            updateOffsetUI();
+        } else {
+            fixedPos = {
+                x: Math.max(20, Math.min(window.innerWidth - 20, Math.round(dragStartOrigin.x + dx))),
+                y: Math.max(20, Math.min(window.innerHeight - 20, Math.round(dragStartOrigin.y + dy)))
+            };
+        }
+
+        updateKeyboardCenter();
+    }
+
     // 👆 MULTI-TOUCH & PALM-REJECTION HANDLER
     function handleTouch(e) {
+        if (moveMode) {
+            handleMoveDrag(e);
+            return;
+        }
+
         let activeTouch = null;
 
         if (activeTouchId !== null) {
@@ -458,13 +607,13 @@
     btnSpace.addEventListener('touchstart', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        commitText(" ");
+        if (!moveMode) commitText(" ");
     }, {passive: false});
     
     btnBackspace.addEventListener('touchstart', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        deleteChar();
+        if (!moveMode) deleteChar();
     }, {passive: false});
 
     // 🎛️ Slider Listeners
@@ -488,7 +637,55 @@
         applyDimensions();
     });
 
+    offsetXSlider.addEventListener('input', (e) => {
+        offsetX = parseInt(e.target.value, 10);
+        updateOffsetUI();
+        updateKeyboardCenter();
+    });
+
+    offsetYSlider.addEventListener('input', (e) => {
+        offsetY = parseInt(e.target.value, 10);
+        updateOffsetUI();
+        updateKeyboardCenter();
+    });
+
     // 🎛️ Toggle Listeners
+    toggleFollowBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        followCaret = !followCaret;
+        if (!followCaret) {
+            // Pin exactly where the keyboard currently sits
+            fixedPos = { x: kbdCenter.x, y: kbdCenter.y };
+        }
+        toggleFollowBtn.textContent = `Follow: ${followCaret ? 'ON' : 'OFF'}`;
+        toggleFollowBtn.classList.toggle('active', followCaret);
+        offsetGrid.classList.toggle('disabled', !followCaret);
+        updateKeyboardCenter();
+    }, {passive: false});
+
+    toggleMoveBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        moveMode = !moveMode;
+        activeTouchId = null;
+        activeCharIndex = null;
+        fingerPos = null;
+        dragTouchId = null;
+        toggleMoveBtn.textContent = `Move: ${moveMode ? 'ON' : 'OFF'}`;
+        toggleMoveBtn.classList.toggle('move-active', moveMode);
+    }, {passive: false});
+
+    btnResetPos.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        offsetX = 0;
+        offsetY = 0;
+        fixedPos = { x: caretPos.x, y: caretPos.y };
+        updateOffsetUI();
+        updateKeyboardCenter();
+    }, {passive: false});
+
     toggleInnerBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -549,6 +746,26 @@
         const cy = kbdCenter.y;
         const now = Date.now();
 
+        // 0️⃣ MOVE MODE INDICATOR (Tether line only when following caret)
+        if (moveMode) {
+            if (followCaret) {
+                ctx.save();
+                ctx.setLineDash([6, 6]);
+                ctx.beginPath();
+                ctx.moveTo(caretPos.x, caretPos.y);
+                ctx.lineTo(cx, cy);
+                ctx.strokeStyle = '#FF9800';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#FF9800';
+            ctx.fill();
+        }
+
         // 1️⃣ COLOR-FILLED KEY HIGHLIGHTS
         for (let i = 0; i < numItems; i++) {
             const zone = getZoneForIndex(i);
@@ -580,7 +797,7 @@
         if (showInnerCircle) {
             ctx.beginPath();
             ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
-            ctx.strokeStyle = '#2196F3';
+            ctx.strokeStyle = moveMode ? '#FF9800' : '#2196F3';
             ctx.lineWidth = Math.max(3, Math.min(6, innerRadius * 0.1));
             ctx.stroke();
         }
@@ -611,7 +828,7 @@
         if (showOuterCircle) {
             ctx.beginPath();
             ctx.arc(cx, cy, outerRadius, 0, Math.PI * 2);
-            ctx.strokeStyle = '#2196F3';
+            ctx.strokeStyle = moveMode ? '#FF9800' : '#2196F3';
             ctx.lineWidth = Math.max(2, Math.min(4, innerRadius * 0.08));
             ctx.stroke();
         }
